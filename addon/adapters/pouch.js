@@ -28,12 +28,14 @@ import {
 //});
 
 export default DS.RESTAdapter.extend({
+
   fixDeleteBug: true,
   coalesceFindRequests: false,
 
   init() {
     this._super(arguments);
     this._indexPromises = [];
+    this._pouchConfig = getOwner(this).resolveRegistration('config:environment')['ember-pouch'];
     this.createdRecords = {};
     this.waitingForConsistency = {};
   },
@@ -104,7 +106,9 @@ export default DS.RESTAdapter.extend({
 
     const store = this.store;
     try {
-      store.modelFor(obj.type);
+      if (!store.isDestroyed) {
+        store.modelFor(obj.type);
+      }
     } catch (e) {
       // The record refers to a model which this version of the application
       // does not have.
@@ -194,6 +198,7 @@ export default DS.RESTAdapter.extend({
       schemaDef['documentType'] = type.documentType;
     }
 
+    // TODO: generalize & document config/env
     let config = getOwner(this).resolveRegistration('config:environment');
     // else it's new, so update
     this._schema.push(schemaDef);
@@ -503,15 +508,36 @@ export default DS.RESTAdapter.extend({
   },
 
   updateRecord: function (store, type, snapshot) {
+    this._updateCounter = (this._updateCounter || 0) + 1;
+    const thisUpdateCounter = this._updateCounter;
     this._init(store, type);
     const data = this._recordToData(store, type, snapshot);
-    return this.get('db').rel.save(this.getRecordTypeName(type), data);
+    console.log(`thisUpdateCounter = ${thisUpdateCounter}`, data); // eslint-disable-line no-console
+    const promise = this.get('db').rel.save(this.getRecordTypeName(type), data);
+    promise.then((...args) => {
+      console.log(`updateRecord finished successfully (thisUpdateCounter=${thisUpdateCounter})`, ...args); // eslint-disable-line no-console
+    }).catch(e => {
+      console.error(`updateRecord FAILED (thisUpdateCounter=${thisUpdateCounter})`, e, data); // eslint-disable-line no-console
+      //debugger;
+    });
+    return promise;
   },
 
   deleteRecord: function (store, type, record) {
+    this._deleteCounter = (this._deleteCounter || 0) + 1;
+    const thisDeleteCounter = this._deleteCounter;
     this._init(store, type);
     const data = this._recordToData(store, type, record);
-    return this.get('db').rel.del(this.getRecordTypeName(type), data)
+    console.log(`this._deleteCounter = ${this._deleteCounter}`, data); // eslint-disable-line no-console
+    const promise = this.get('db').rel.del(this.getRecordTypeName(type), data)
       .then(extractDeleteRecord);
+    promise.then((...args) => {
+      console.log(`deleteRecord finished successfully (thisDeleteCounter=${thisDeleteCounter})`, ...args); // eslint-disable-line no-console
+    }).catch(e => {
+      console.error(`deleteRecord FAILED (thisDeleteCounter=${thisDeleteCounter})`, e, data); // eslint-disable-line no-console
+      //debugger;
+    });
+    return promise;
+
   }
 });

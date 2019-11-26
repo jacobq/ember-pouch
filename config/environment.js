@@ -1,13 +1,10 @@
 /* eslint-env node */
 'use strict';
 
-module.exports = function(environment /*, appConfig */) {
-  const ENV = {
-    APP: {},
+module.exports = function(/*environment, appConfig*/) {
+  return {
+    'ember-pouch': {
+      revModelProperty: 'rev'
+    }
   };
-  if (environment === 'test') {
-    ENV.APP.autoboot = false;
-  }
-
-  return ENV;
 };

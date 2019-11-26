@@ -41,7 +41,7 @@ function getDocsForRelations() {
   result.push({ _id: 'foodItem_2_Y', data: { name: 'pork loin', soup: 'C' }});
   result.push({ _id: 'foodItem_2_Z', data: { name: 'black beans', soup: 'D' }});
 
-    return result;
+  return result;
 }
 
 /*
@@ -283,6 +283,28 @@ test('update a newly created record before it has finished saving', function (as
 
   }).finally(done);
 });
+
+
+test('call destroy after findAll', async function (assert) {
+  assert.expect(2);
+
+  var done = assert.async();
+  const recordData = [
+    { id: 'chicken', flavor: 'yellow' },
+    { id: 'tomato', flavor: 'red' },
+  ];
+  const records = recordData.map(p => this.store.createRecord('taco-soup', p));
+  const savedRecords = await all(records.map(r => r.save()));
+  const pouchDocs = await all(recordData.map(rd => this.db().get(`tacoSoup_2_${rd.id}`)));
+
+  assert.equal(newDoc.data.flavor, 'balsamic', 'should have saved the attribute');
+  const recordInStore = this.store().peekRecord('tacoSoup', 'E');
+  assert.equal(newDoc._rev, recordInStore.get('rev'),
+    'should have associated the ember-data record with the rev for the new record');
+
+  done();
+});
+
 
 test('creating an associated record stores a reference to it in the parent', function (assert) {
   assert.expect(1);
