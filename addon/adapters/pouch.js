@@ -3,7 +3,7 @@ import { getOwner } from '@ember/application';
 import { get } from '@ember/object';
 import { on } from '@ember/object/evented';
 import { isEmpty } from '@ember/utils';
-import { bind } from '@ember/runloop';
+import { bind, later } from '@ember/runloop';
 import { classify, camelize } from '@ember/string';
 
 import DS from 'ember-data';
@@ -71,6 +71,7 @@ export default DS.RESTAdapter.extend({
     }
   },
   changeDb: function(db) {
+    console.log('changeDb', db); // eslint-disable-line no-console
     this._stopChangesListener();
 
     const store = this.store;
@@ -85,6 +86,9 @@ export default DS.RESTAdapter.extend({
     this._startChangesToStoreListener();
   },
   onChange: function (change) {
+    console.log('onChange', change); // eslint-disable-line no-console
+    return; // FIXME: disabling for now
+
     // If relational_pouch isn't initialized yet, there can't be any records
     // in the store to update.
     if (!this.get('db').rel) { return; }
@@ -105,10 +109,13 @@ export default DS.RESTAdapter.extend({
     }
 
     const store = this.store;
+    if (store.isDestroyed) {
+      // The store has been destroyed (e.g. in test environment)
+      // If execution reaches this point it is probably a bug.
+      return;
+    }
     try {
-      if (!store.isDestroyed) {
-        store.modelFor(obj.type);
-      }
+      store.modelFor(obj.type);
     } catch (e) {
       // The record refers to a model which this version of the application
       // does not have.
@@ -133,12 +140,15 @@ export default DS.RESTAdapter.extend({
       return;
     }
 
+    //debugger;
     if (change.deleted) {
+      //if (!recordInStore._internalModel.isDeleted()) {
       if (this.fixDeleteBug) {
         recordInStore._internalModel.transitionTo('deleted.saved');//work around ember-data bug
       } else {
         store.unloadRecord(recordInStore);
       }
+      //}
     } else {
       recordInStore.reload();
     }
@@ -158,6 +168,7 @@ export default DS.RESTAdapter.extend({
   },
 
   willDestroy: function() {
+    console.log('willDestroy'); // eslint-disable-line no-console
     this._stopChangesListener();
   },
 
@@ -343,18 +354,31 @@ export default DS.RESTAdapter.extend({
     return camelize(type.modelName);
   },
 
+  findAllCount: 1,
   findAll: function(store, type /*, sinceToken */) {
     // TODO: use sinceToken
     this._init(store, type);
-    return this.get('db').rel.find(this.getRecordTypeName(type));
+    const promise = this.get('db').rel.find(this.getRecordTypeName(type)).then((...args) => {
+      return new Promise((resolve) => later(null, () => resolve(...args), 10)); // FIXME: figure out why this fixes it
+    });
+    const count = this.findAllCount++;
+    console.log(`findAll (count=${count})`, type); // eslint-disable-line no-console
+    promise.then((...args) => {
+      console.log(`findAll (count=${count}) finished:`, ...args); // eslint-disable-line no-console
+      console.log(args[0]);
+      //debugger;
+    });
+    return promise;
   },
 
   findMany: function(store, type, ids) {
+    console.log('findMany', type, ids); // eslint-disable-line no-console
     this._init(store, type);
     return this.get('db').rel.find(this.getRecordTypeName(type), ids);
   },
 
   findHasMany: function(store, record, link, rel) {
+    console.log('findHasMany', record, link, rel); // eslint-disable-line no-console
     let inverse = record.type.inverseFor(rel.key, store);
     if (inverse && inverse.kind === 'belongsTo') {
       return this.get('db').rel.findHasMany(camelize(rel.type), inverse.name, record.id);
@@ -366,6 +390,7 @@ export default DS.RESTAdapter.extend({
   },
 
   query: function(store, type, query) {
+    console.log('query', type, query); // eslint-disable-line no-console
     this._init(store, type);
 
     const recordTypeName = this.getRecordTypeName(type);
@@ -391,6 +416,7 @@ export default DS.RESTAdapter.extend({
   },
 
   queryRecord: function(store, type, query) {
+    console.log('queryRecord', type, query); // eslint-disable-line no-console
     return this.query(store, type, query).then(results => {
       const recordType = this.getRecordTypeName(type);
       const recordTypePlural = pluralize(recordType);
@@ -412,17 +438,20 @@ export default DS.RESTAdapter.extend({
    * for deprecated methods.
   */
   find: function (store, type, id) {
+    console.log('find', type, id); // eslint-disable-line no-console
     return this.findRecord(store, type, id);
   },
 
   findRecord: function (store, type, id) {
+    console.log('findRecord', type, id); // eslint-disable-line no-console
     this._init(store, type);
     const recordTypeName = this.getRecordTypeName(type);
     return this._findRecord(recordTypeName, id);
   },
 
   _findRecord(recordTypeName, id) {
-    return this.get('db').rel.find(recordTypeName, id).then(payload => {
+    console.log('_findRecord', recordTypeName, id); // eslint-disable-line no-console
+    const promise = this.get('db').rel.find(recordTypeName, id).then(payload => {
       // Ember Data chokes on empty payload, this function throws
       // an error when the requested data is not found
       if (typeof payload === 'object' && payload !== null) {
@@ -440,6 +469,10 @@ export default DS.RESTAdapter.extend({
       else
         return this._eventuallyConsistent(recordTypeName, id);
     });
+    promise.then(() => {
+      console.log('_findRecord finished'); // eslint-disable-line no-console
+    });
+    return promise;
   },
 
   //TODO: cleanup promises on destroy or db change?
@@ -450,6 +483,7 @@ export default DS.RESTAdapter.extend({
     this.waitingForConsistency[pouchID] = defer;
 
     return this.get('db').rel.isDeleted(type, id).then(deleted => {
+      console.log(`_eventuallyConsistent > isDeleted`, deleted); // eslint-disable-line no-console
       //TODO: should we test the status of the promise here? Could it be handled in onChange already?
       if (deleted) {
         delete this.waitingForConsistency[pouchID];

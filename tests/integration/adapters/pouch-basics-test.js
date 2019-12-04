@@ -284,24 +284,32 @@ test('update a newly created record before it has finished saving', function (as
   }).finally(done);
 });
 
-
+// FAILING
 test('call destroy after findAll', async function (assert) {
-  assert.expect(2);
+  assert.expect(8);
 
   var done = assert.async();
   const recordData = [
     { id: 'chicken', flavor: 'yellow' },
     { id: 'tomato', flavor: 'red' },
   ];
-  const records = recordData.map(p => this.store.createRecord('taco-soup', p));
+  const store = this.store();
+  const records = recordData.map(p => store.createRecord('taco-soup', p));
   const savedRecords = await all(records.map(r => r.save()));
+
   const pouchDocs = await all(recordData.map(rd => this.db().get(`tacoSoup_2_${rd.id}`)));
+  //console.log("pouchDocs", pouchDocs); // eslint-disable-line no-console
+  recordData.forEach(({ id, flavor }, i) => {
+    assert.equal(savedRecords[i].id, id, 'id');
+    assert.equal(savedRecords[i].flavor, flavor, 'flavor');
+    assert.equal(pouchDocs[i].data.flavor, flavor, 'pouchDocs.flavor');
+    const recordInStore = store.peekRecord('tacoSoup', id);
+    assert.equal(recordInStore.flavor, flavor, 'recordInStore.flavor');
+  });
 
-  assert.equal(newDoc.data.flavor, 'balsamic', 'should have saved the attribute');
-  const recordInStore = this.store().peekRecord('tacoSoup', 'E');
-  assert.equal(newDoc._rev, recordInStore.get('rev'),
-    'should have associated the ember-data record with the rev for the new record');
-
+  const foundRecords = await store.findAll('tacoSoup');
+  //await new Promise((resolve) => setTimeout(resolve, 10)); // FIXME: figure out why this prevents the problem
+  await all(foundRecords.map(r => r.destroyRecord()));
   done();
 });
 

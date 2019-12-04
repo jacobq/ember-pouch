@@ -10,6 +10,9 @@ module.exports = {
   ],
   browser_args: {
     Chrome: {
+      dev: [
+        '--auto-open-devtools-for-tabs'
+      ],
       ci: [
         // --no-sandbox is needed when running Chrome inside a container
         process.env.CI ? '--no-sandbox' : null,
