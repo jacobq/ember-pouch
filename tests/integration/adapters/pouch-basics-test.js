@@ -296,7 +296,7 @@ test('call destroy after findAll', async function (assert) {
   const store = this.store();
   const records = recordData.map(p => store.createRecord('taco-soup', p));
   const savedRecords = await all(records.map(r => r.save()));
-
+  console.log("*** 1 - Created & saved ***"); // eslint-disable-line no-console
   const pouchDocs = await all(recordData.map(rd => this.db().get(`tacoSoup_2_${rd.id}`)));
   //console.log("pouchDocs", pouchDocs); // eslint-disable-line no-console
   recordData.forEach(({ id, flavor }, i) => {
@@ -307,9 +307,12 @@ test('call destroy after findAll', async function (assert) {
     assert.equal(recordInStore.flavor, flavor, 'recordInStore.flavor');
   });
 
+  console.log("*** 2 - store.findAll start ***"); // eslint-disable-line no-console
   const foundRecords = await store.findAll('tacoSoup');
-  //await new Promise((resolve) => setTimeout(resolve, 10)); // FIXME: figure out why this prevents the problem
+  console.log("*** 3 - store.findAll resolved / destroyRecord starting ***"); // eslint-disable-line no-console
+  //await new Promise((resolve) => setTimeout(resolve, 10)); // FIXME: putting delay here circumvents problem
   await all(foundRecords.map(r => r.destroyRecord()));
+  console.log("*** 4 - destroyRecord resolved ***"); // eslint-disable-line no-console
   done();
 });
 

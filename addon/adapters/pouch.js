@@ -6,6 +6,7 @@ import { isEmpty } from '@ember/utils';
 import { bind, later } from '@ember/runloop';
 import { classify, camelize } from '@ember/string';
 
+
 import DS from 'ember-data';
 import { pluralize } from 'ember-inflector';
 import RSVP from 'rsvp';
@@ -355,20 +356,31 @@ export default DS.RESTAdapter.extend({
   },
 
   findAllCount: 1,
-  findAll: function(store, type /*, sinceToken */) {
-    // TODO: use sinceToken
+  findAll: function(store, type, _neverSet, snapshotRecordArray) {
     this._init(store, type);
-    const promise = this.get('db').rel.find(this.getRecordTypeName(type)).then((...args) => {
-      return new Promise((resolve) => later(null, () => resolve(...args), 10)); // FIXME: figure out why this fixes it
-    });
+    const startTime = Date.now();
+    const recordTypeName = this.getRecordTypeName(type);
     const count = this.findAllCount++;
-    console.log(`findAll (count=${count})`, type); // eslint-disable-line no-console
-    promise.then((...args) => {
-      console.log(`findAll (count=${count}) finished:`, ...args); // eslint-disable-line no-console
+    console.log(`findAll (count=${count}, recordTypeName=${recordTypeName})`, snapshotRecordArray.snapshots().map(sar => sar._internalModel.currentState.stateName)); // eslint-disable-line no-console
+    //debugger;
+    const p1 = this.get('db').rel.find(recordTypeName);
+    p1.then(() => console.log(`rel.find took ${Date.now()-startTime}ms`)); // eslint-disable-line no-console
+    //const p2 = p1.then((...args) => {
+    //  return new Promise((resolve) => later(null, () => resolve(...args), 10)); // FIXME: inserting a delay here circumvents the problem
+    //});
+    p1.then((...args) => {
+      console.log(`findAll (count=${count}) finished:`, ...args, snapshotRecordArray.snapshots().map(sar => sar._internalModel.currentState.stateName)); // eslint-disable-line no-console
       console.log(args[0]);
-      //debugger;
     });
-    return promise;
+    return p1.then((data) => {
+      const states = snapshotRecordArray.snapshots().map(sar => sar._internalModel.currentState.stateName);
+      if (states.some(s => s.includes('deleted.inFlight'))) {
+        //throw Error(`Records appear to have been deleted between calling pouch adapter's findAll and its underlying tasks finishing`);
+        const plural = pluralize(recordTypeName);
+        data[plural] = data[plural].filter((_r, i) => !states[i].includes('deleted.inFlight'));
+      }
+      return data;
+    });
   },
 
   findMany: function(store, type, ids) {
@@ -562,7 +574,7 @@ export default DS.RESTAdapter.extend({
     const thisDeleteCounter = this._deleteCounter;
     this._init(store, type);
     const data = this._recordToData(store, type, record);
-    console.log(`this._deleteCounter = ${this._deleteCounter}`, data); // eslint-disable-line no-console
+    console.log(`deleteRecord (count=${this._deleteCounter})`, data); // eslint-disable-line no-console
     const promise = this.get('db').rel.del(this.getRecordTypeName(type), data)
       .then(extractDeleteRecord);
     promise.then((...args) => {
