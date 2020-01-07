@@ -3,7 +3,7 @@ import { getOwner } from '@ember/application';
 import { get } from '@ember/object';
 import { on } from '@ember/object/evented';
 import { isEmpty } from '@ember/utils';
-import { bind, later } from '@ember/runloop';
+import { bind } from '@ember/runloop';
 import { classify, camelize } from '@ember/string';
 
 
@@ -565,7 +565,7 @@ export default DS.RESTAdapter.extend({
    * @return Content to persist (result of merge/resolution)
    */
   handleUpdateConflict(dbDoc, reqDoc) {
-    reqDoc.rev = dbDoc.rev;
+    reqDoc.rev = dbDoc._rev;
     return reqDoc;
   },
 
@@ -596,13 +596,15 @@ export default DS.RESTAdapter.extend({
         // There is at least one pending update for this ID so add another piece to the promise chain to get the latest rev
         console.log(`updateRecord: going to chain onto previousUpdates =`, previousUpdates); // eslint-disable-line no-console
         previousUpdates = previousUpdates.then(() => {
-          console.log('updateRecord: retrieving latest rev from DB'); // eslint-disable-line no-console
-          return this.findRecord(store, type, snapshot);
-        }).then(dbRecord => {
-          console.log(`updateRecord: DB has latest rev = ${dbRecord.rev}`); // eslint-disable-line no-console
+          const docID = this.db.rel.makeDocID({ type: type.modelName, id: data.id });
+          console.log('updateRecord: retrieving latest rev from DB', docID); // eslint-disable-line no-console
+          return this.db.get(docID);
+        }).then(dbDoc => {
+          const rev = dbDoc._rev;
+          console.log(`updateRecord: DB has latest rev = ${rev}`); // eslint-disable-line no-console
           const update = data;
-          data = this.handleUpdateConflict(dbRecord, update);
-          console.log('updateRecord: handleUpdateConflict: dbRecord =', dbRecord, ` (rev=${dbRecord.rev}), update =`, update, ` (rev=${update.rev}), resolved with result =`, data, `(rev=${data.rev})`); // eslint-disable-line no-console
+          data = this.handleUpdateConflict(dbDoc, update);
+          console.log('updateRecord: handleUpdateConflict: dbDoc =', dbDoc, ` (rev=${rev}), update =`, update, ` (rev=${update.rev}), resolved with result =`, data, `(rev=${data.rev})`); // eslint-disable-line no-console
         });
       }
 
