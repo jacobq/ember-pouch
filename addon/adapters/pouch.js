@@ -553,19 +553,83 @@ export default DS.RESTAdapter.extend({
     return record._emberPouchSavePromise;
   },
 
+  /**
+   * This method is invoked when `updateRecord` is subsequently called for the same ID before previous transactions
+   * have completed (i.e. when an update conflict would have otherwise occurred).
+   * If there is only one application instance interacting with the database then the store
+   * should have all the latest changes already and no special merging should be needed here.
+   * Thus, by default, this function just applies the latest revision code and overwrites any existing
+   * contents with that present in the document passed to `updateRecord`.
+   * @param dbDoc Latest content persisted to database
+   * @param reqDoc Content requested to be persisted (whatever was passed to `updateRecord`).
+   * @return Content to persist (result of merge/resolution)
+   */
+  handleUpdateConflict(dbDoc, reqDoc) {
+    reqDoc.rev = dbDoc.rev;
+    return reqDoc;
+  },
+
   updateRecord: function (store, type, snapshot) {
     this._updateCounter = (this._updateCounter || 0) + 1;
     const thisUpdateCounter = this._updateCounter;
     this._init(store, type);
-    const data = this._recordToData(store, type, snapshot);
-    console.log(`thisUpdateCounter = ${thisUpdateCounter}`, data); // eslint-disable-line no-console
-    const promise = this.get('db').rel.save(this.getRecordTypeName(type), data);
+    let data = this._recordToData(store, type, snapshot);
+    console.log(`updateRecord: thisUpdateCounter = ${thisUpdateCounter}, id=${data.id}, rev=${data.rev}`); // eslint-disable-line no-console
+
+    // If there's a pending update on this same ID then a "Document update conflict" error is going to be thrown
+    // by the back-end unless we do something to prevent it since both updates would be specifying the same base rev.
+    // The data structure we use here to avoid these conflicts works as follows:
+    //   1. A map object associates document IDs with arrays of pending updates, each represented by a promise
+    //   2. If the array is not empty when a new update starts, it gets deferred
+    //      until all pending update have finished. Otherwise it begins immediately.
+    //   3. Whenever an update finishes it is removed from the array.
+    //   4. In the case of deferral, the `handleUpdateConflict` function is called once it is time to execute
+    //      the next update, and the returned value is passed to the back-end (and if that function has done its job
+    //      then no update conflict will occur).
+    this._updatesInProgress = this._updatesInProgress || {}; // map of arrays of pending update promises for each document ID
+    this._updatesInProgress[data.id] = this._updatesInProgress[data.id] || [];
+    const promise = Promise.resolve().then(() => {
+      // being extra careful because otherwise it's easy to accidentally deadlock (waiting for yourself)
+      const pending = Object.freeze(Array.from(this._updatesInProgress[data.id]));
+      let previousUpdates = Promise.all(pending);
+      if (pending.length > 0) {
+        // There is at least one pending update for this ID so add another piece to the promise chain to get the latest rev
+        console.log(`updateRecord: going to chain onto previousUpdates =`, previousUpdates); // eslint-disable-line no-console
+        previousUpdates = previousUpdates.then(() => {
+          console.log('updateRecord: retrieving latest rev from DB'); // eslint-disable-line no-console
+          return this.findRecord(store, type, snapshot);
+        }).then(dbRecord => {
+          console.log(`updateRecord: DB has latest rev = ${dbRecord.rev}`); // eslint-disable-line no-console
+          const update = data;
+          data = this.handleUpdateConflict(dbRecord, update);
+          console.log('updateRecord: handleUpdateConflict: dbRecord =', dbRecord, ` (rev=${dbRecord.rev}), update =`, update, ` (rev=${update.rev}), resolved with result =`, data, `(rev=${data.rev})`); // eslint-disable-line no-console
+        });
+      }
+
+      // Track pending updates
+      // Since JS is single threaded and updates are deferred until previous ones are done, we should be able to safely
+      // assume that the update promises will be resolved in order (can just remove done ones from the from the front
+      // and append pending ones to the back)
+      this._updatesInProgress[data.id].push(promise);
+      promise.finally(() => {
+        console.log(`updateRecord removing completed entry from _updatesInProgress[${data.id}]`); // eslint-disable-line no-console
+        // Important for maintaining data structure integrity/correctness
+        this._updatesInProgress[data.id].shift();
+      });
+
+      //console.log('updateRecord: waiting for previous updates', previousUpdates); // eslint-disable-line no-console
+      return previousUpdates.then(() => this.get('db').rel.save(this.getRecordTypeName(type), data));
+    });
+
+
+    // DEBUG
     promise.then((...args) => {
       console.log(`updateRecord finished successfully (thisUpdateCounter=${thisUpdateCounter})`, ...args); // eslint-disable-line no-console
     }).catch(e => {
       console.error(`updateRecord FAILED (thisUpdateCounter=${thisUpdateCounter})`, e, data); // eslint-disable-line no-console
-      //debugger;
     });
+
+
     return promise;
   },
 
